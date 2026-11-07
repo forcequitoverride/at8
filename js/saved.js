@@ -2,9 +2,11 @@
 //   Highlights · Rated (♥ Like / ♥♥ Like very much / ∞ Timeless) · Favourites · Notes
 import { store } from './store.js';
 import * as db from './db.js';
-import { esc, paragraphs, fmtDate, fmtDateTime, toast, lengthLabel, SENDER_NAME, RATINGS } from './util.js';
+import { esc, paragraphs, fmtDate, lengthLabel, SENDER_NAME, RATINGS } from './util.js';
+import { noteHtml, noteFormHtml, wireNoteForm, wireNoteList } from './notes.js';
 
 let tab = 'highlights';
+let noteFilter = 'all';   // 'all' | 'mine' | 'dev'
 let ratedLevel = 'all';   // 'all' or '1' | '2' | '3'
 
 export async function renderSaved(root) {
@@ -60,26 +62,21 @@ export async function renderSaved(root) {
       pane.innerHTML = favs.map((e) => emailCard(e)).join('')
         || empty('No favourites yet. Tap the ★ at the top of an email to keep it here.');
     } else {
-      pane.innerHTML = `<form class="note-form" id="freeNote" style="margin-bottom:14px">
-          <label class="sr-only" for="freeText">New note</label>
-          <textarea id="freeText" placeholder="A note of your own — not tied to any email."></textarea>
-          <button class="btn primary" type="submit">Save note</button>
-        </form>
-        <div class="notes">${notes.map((n) => {
-          const e = n.emailId && store.byId.get(n.emailId);
-          const on = e ? `<small style="display:block;color:var(--muted);font-size:12px;margin-top:6px">on <a href="#/read/${e.id}">${esc(e.subject)}</a> · ${SENDER_NAME[e.sender]}</small>` : '';
-          return `<div class="note"><time>${fmtDateTime(n.created)}</time>${esc(n.text)}${on}</div>`;
-        }).join('') || empty('No notes yet.')}</div>`;
-      pane.querySelector('#freeNote').addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const text = pane.querySelector('#freeText').value.trim();
-        if (!text) return;
-        const note = { emailId: null, text, created: new Date().toISOString() };
-        note.nid = await db.put('notes', note);
-        db.logEvent('note', null, { nid: note.nid, length: text.length });
-        toast('Note saved');
-        renderSaved(root);
-      });
+      const devCount = notes.filter((n) => n.kind === 'dev').length;
+      const shown = noteFilter === 'dev' ? notes.filter((n) => n.kind === 'dev')
+        : noteFilter === 'mine' ? notes.filter((n) => n.kind !== 'dev') : notes;
+      pane.innerHTML = `<div class="values sublevels">
+          <button class="chip value" data-nf="all" aria-pressed="${noteFilter === 'all'}">All <span class="n">${notes.length}</span></button>
+          <button class="chip value" data-nf="mine" aria-pressed="${noteFilter === 'mine'}">My notes <span class="n">${notes.length - devCount}</span></button>
+          <button class="chip value" data-nf="dev" aria-pressed="${noteFilter === 'dev'}">Dev notes <span class="n">${devCount}</span></button>
+        </div>
+        ${noteFilter === 'dev' ? '<p class="hint">Dev notes are ideas, wishes and problems for the developer. They go out with <b>Data → Export activity</b>, and get read through with you at the start of the next dev session.</p>' : ''}
+        ${noteFormHtml('A note of your own — not tied to any email.')}
+        <div class="notes" id="noteList" style="margin-top:14px">${shown.map((n) => noteHtml(n, { showEmail: true })).join('') || empty('No notes here yet.')}</div>`;
+      if (noteFilter === 'dev') pane.querySelector('input[name="dev"]').checked = true;
+      pane.querySelectorAll('[data-nf]').forEach((b) => b.addEventListener('click', () => { noteFilter = b.dataset.nf; draw(); }));
+      wireNoteForm(pane.querySelector('[data-note-form]'), { onSaved: () => renderSaved(root) });
+      wireNoteList(pane.querySelector('#noteList'), { showEmail: true });
     }
   };
   root.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; draw(); }));

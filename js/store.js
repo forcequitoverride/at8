@@ -31,11 +31,14 @@ export async function saveState(s) {
   await db.put('state', s);
 }
 
-// "read" = reached the end at least once; "started" = opened but not finished.
+// "read" = reached the end at least once (not counting visits marked as skims);
+// "skimmed" = only ever skimmed; "started" = opened but not finished.
 export function status(id) {
   const s = store.state.get(id);
   if (!s || !s.opens) return 'unread';
-  return s.reads > 0 ? 'read' : 'started';
+  if (s.reads > 0) return 'read';
+  if (s.skims > 0) return 'skimmed';
+  return 'started';
 }
 
 // Ranked full-text search: every term must appear; subject hits weigh more.

@@ -18,8 +18,8 @@ function groups() {
     { key: 'sender', label: 'Sender', values: [{ v: 'tate', label: 'Andrew Tate' }, { v: 'zarak', label: 'Zarak' }], test: (e, v) => e.sender === v },
     {
       key: 'status', label: 'Read status',
-      values: [{ v: 'unread', label: 'Never read' }, { v: 'started', label: 'In progress' }, { v: 'read', label: 'Read' }, { v: 'fav', label: '★ Favourite' }],
-      test: (e, v) => (v === 'fav' ? stateOf(e.id).favourite : status(e.id) === v),
+      values: [{ v: 'unread', label: 'Never read' }, { v: 'started', label: 'In progress' }, { v: 'skimmed', label: 'Skimmed' }, { v: 'read', label: 'Read' }, { v: 'reread', label: 'Read 2+ times' }, { v: 'fav', label: '★ Favourite' }],
+      test: (e, v) => (v === 'fav' ? stateOf(e.id).favourite : v === 'reread' ? stateOf(e.id).reads >= 2 : status(e.id) === v),
     },
     {
       key: 'rating', label: 'Rating',
@@ -80,13 +80,13 @@ const anyPicks = () => Object.values(f.sel).some((s) => s.size);
 // Emails you started but didn't finish, most recent first, with the time each still needs.
 function continueStrip() {
   const started = [...store.state.values()]
-    .filter((s) => s.opens && !s.reads && s.maxProgress < 0.95 && store.byId.has(s.id))
+    .filter((s) => s.opens && !s.reads && !s.skims && s.maxProgress < 0.95 && store.byId.has(s.id))
     .sort((a, b) => (b.lastOpened || '').localeCompare(a.lastOpened || ''))
     .slice(0, 3);
   if (!started.length) return '';
   return `<div class="continue"><div class="continue-title">Continue reading</div>${started.map((s) => {
     const e = store.byId.get(s.id);
-    return `<a href="#/read/${e.id}" data-sender="${e.sender}"><span class="subj">${esc(e.subject)}</span><span class="left">${fmtMins(minsLeft(e.words, s.maxProgress))} left</span></a>`;
+    return `<a href="#/read/${e.id}" data-sender="${e.sender}"><span class="subj">${esc(e.subject)}</span><span class="left">${Math.floor(s.maxProgress * 100)}% · ${fmtMins(minsLeft(e.words, s.maxProgress))} left</span></a>`;
   }).join('')}</div>`;
 }
 
@@ -111,9 +111,10 @@ function itemHtml(e, terms) {
   const progress = stat === 'started' ? `<div class="progress"><i style="width:${Math.round(st.maxProgress * 100)}%"></i></div>` : '';
   // The time cost, shown before you open anything. In progress = what's left.
   const cost = stat === 'started'
-    ? `${fmtMins(minsLeft(e.words, st.maxProgress))} left`
+    ? `${Math.floor(st.maxProgress * 100)}% read · ${fmtMins(minsLeft(e.words, st.maxProgress))} left`
     : `${len.label} · ${readMinutes(e.words)} min`;
-  return `<li><a class="item ${stat === 'unread' ? 'unread' : ''}" data-sender="${e.sender}" href="#/read/${e.id}">
+  if (stat === 'skimmed') badges.push(`<span class="badge">skimmed${st.skims > 1 ? ` ×${st.skims}` : ''}</span>`);
+  return `<li><a class="item ${stat === 'unread' ? 'unread' : ''} ${stat === 'skimmed' ? 'skimmed' : ''}" data-sender="${e.sender}" href="#/read/${e.id}">
     <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span><span>${fmtDate(e.date)}</span><span class="len len-${len.v}">${cost}</span></div>
     <div class="subject">${esc(e.subject || '(no subject)')}</div>
     <div class="snippet">${snippet(e, terms)}</div>

@@ -1,7 +1,8 @@
 // Reader: comfortable reading view that records how you read.
 import { store, stateOf, saveState, status } from './store.js';
 import * as db from './db.js';
-import { esc, linkify, paragraphs, fmtDate, fmtDateTime, readMinutes, toast, icon, fmtMins, minsLeft, lengthLabel, SENDER_NAME, RATINGS, LENGTHS, lengthOf } from './util.js';
+import { esc, linkify, paragraphs, fmtDate, readMinutes, toast, icon, fmtMins, minsLeft, lengthLabel, SENDER_NAME, RATINGS, LENGTHS, lengthOf } from './util.js';
+import { noteHtml, noteFormHtml, wireNoteForm, wireNoteList } from './notes.js';
 
 const FINISHED = 0.95;   // scrolled 95% of the way = read
 const SIZES = [16, 17, 18, 19, 20, 22, 24, 26];
@@ -14,6 +15,7 @@ export async function renderReader(root, id) {
   }
 
   const st = { ...stateOf(id), highlights: [...stateOf(id).highlights] };
+  st.skims ||= 0;
   const wasFinished = st.reads > 0;
   const now = new Date().toISOString();
   st.opens += 1;
@@ -31,7 +33,19 @@ export async function renderReader(root, id) {
   const size = Number(localStorage.getItem('readerSize')) || 19;
   document.documentElement.style.setProperty('--reader-size', `${size}px`);
 
-  const opened = st.opens === 1 ? 'First time reading' : `Opened ${st.opens} times · read to the end ${st.reads}×`;
+  let skimThisVisit = false;
+  let finishedThisVisit = false;
+  // Your history with this email — re-reads are shown plainly.
+  const historyLine = () => {
+    const parts = [];
+    if (st.opens === 1 && !st.reads && !st.skims) parts.push('First time here');
+    else {
+      parts.push(st.reads ? `<b>Read ${st.reads === 1 ? 'once' : `${st.reads} times`}</b>` : 'Not read to the end yet');
+      if (st.skims) parts.push(`skimmed ${st.skims}×`);
+      parts.push(`opened ${st.opens}×`);
+    }
+    return parts.join(' · ');
+  };
   root.innerHTML = `<div class="reader" data-sender="${e.sender}">
     <div class="readbar">
       <a class="icon-btn" href="#/" aria-label="Back to library">${icon.back}</a>
@@ -47,7 +61,8 @@ export async function renderReader(root, id) {
       <header>
         <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span> · ${fmtDate(e.date)} · ${LENGTHS.find((l) => l.v === lengthOf(e.words)).label}, ${readMinutes(e.words)} min read</div>
         <h1>${esc(e.subject || '(no subject)')}</h1>
-        <div class="meta">${opened}</div>
+        <div class="history-row"><span class="meta" id="history">${historyLine()}</span>
+          <button class="chip skim" id="skim" aria-pressed="false" title="This visit won't count as a read">Just skimming</button></div>
       </header>
       ${rateRow(st.rating)}
       <p class="hint">Tap a paragraph to highlight it.</p>
@@ -57,12 +72,8 @@ export async function renderReader(root, id) {
       ${rateRow(st.rating)}
 
       <div class="section-title">Your notes</div>
-      <div class="notes" id="notes">${notes.map(noteHtml).join('') || '<p class="hint" id="noNotes">No notes on this email yet.</p>'}</div>
-      <form class="note-form" id="noteForm">
-        <label class="sr-only" for="noteText">New note</label>
-        <textarea id="noteText" placeholder="What stood out? A thought, a question, a reminder…"></textarea>
-        <button class="btn primary" type="submit">Save note</button>
-      </form>
+      <div class="notes" id="notes">${notes.map((n) => noteHtml(n)).join('') || '<p class="hint" id="noNotes">No notes on this email yet.</p>'}</div>
+      ${noteFormHtml('What stood out? A thought, a question, a reminder…')}
 
       <nav class="nav-next" aria-label="More emails">
         ${prev ? `<a href="#/read/${prev.id}"><small>← Earlier · ${SENDER_NAME[prev.sender]}</small><span>${esc(prev.subject)}</span><small>${lengthLabel(prev.words)}</small></a>` : '<span></span>'}
@@ -75,7 +86,6 @@ export async function renderReader(root, id) {
   // --- reading progress -----------------------------------------------------
   const bar = root.querySelector('#bar');
   const timeLeft = root.querySelector('#timeLeft');
-  let finishedThisVisit = false;
   let saveTimer = null;
   const progress = () => {
     const h = document.documentElement.scrollHeight - window.innerHeight;
@@ -92,9 +102,12 @@ export async function renderReader(root, id) {
     st.scrollPos = window.scrollY;
     if (p >= FINISHED && !finishedThisVisit) {
       finishedThisVisit = true;
-      st.reads += 1;
-      db.logEvent('finish', id, { reads: st.reads });
-      if (st.reads === 1) toast('Marked as read');
+      if (!skimThisVisit) {
+        st.reads += 1;
+        db.logEvent('finish', id, { reads: st.reads });
+        toast(st.reads === 1 ? 'Marked as read' : `Read ${st.reads} times now`);
+        root.querySelector('#history').innerHTML = historyLine();
+      }
     }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => saveState(st), 800);
@@ -141,6 +154,23 @@ export async function renderReader(root, id) {
     toast(st.favourite ? 'Added to favourites' : 'Removed from favourites');
   });
 
+  // "Just skimming": this visit counts as a skim, not a read — even if you reach the end.
+  root.querySelector('#skim').addEventListener('click', (ev) => {
+    skimThisVisit = !skimThisVisit;
+    ev.currentTarget.setAttribute('aria-pressed', skimThisVisit);
+    if (skimThisVisit) {
+      st.skims += 1;
+      if (finishedThisVisit) st.reads = Math.max(0, st.reads - 1);   // undo this visit's read
+    } else {
+      st.skims = Math.max(0, st.skims - 1);
+      if (finishedThisVisit) st.reads += 1;
+    }
+    root.querySelector('#history').innerHTML = historyLine();
+    saveState(st);
+    db.logEvent('skim', id, { on: skimThisVisit });
+    toast(skimThisVisit ? 'Counted as a skim, not a read' : 'Counting this as a proper read again');
+  });
+
   // Rating ladder: tap a level to set it, tap the current level again to clear.
   root.querySelectorAll('.rate button').forEach((b) => b.addEventListener('click', () => {
     const v = Number(b.dataset.v);
@@ -159,24 +189,20 @@ export async function renderReader(root, id) {
   };
   root.querySelector('#smaller').addEventListener('click', () => setSize(-1));
   root.querySelector('#bigger').addEventListener('click', () => setSize(1));
+  const noteForm = root.querySelector('[data-note-form]');
   root.querySelector('#noteBtn').addEventListener('click', () => {
-    root.querySelector('#noteText').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    root.querySelector('#noteText').focus({ preventScroll: true });
+    noteForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    noteForm.querySelector('textarea').focus({ preventScroll: true });
   });
-
-  root.querySelector('#noteForm').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const ta = root.querySelector('#noteText');
-    const text = ta.value.trim();
-    if (!text) return;
-    const note = { emailId: id, text, created: new Date().toISOString(), progress: Math.round(progress() * 100) / 100 };
-    note.nid = await db.put('notes', note);
-    db.logEvent('note', id, { nid: note.nid, length: text.length });
-    root.querySelector('#noNotes')?.remove();
-    root.querySelector('#notes').insertAdjacentHTML('beforeend', noteHtml(note));
-    ta.value = '';
-    toast('Note saved');
+  wireNoteForm(noteForm, {
+    emailId: id,
+    getProgress: progress,
+    onSaved: (note) => {
+      root.querySelector('#noNotes')?.remove();
+      root.querySelector('#notes').insertAdjacentHTML('beforeend', noteHtml(note));
+    },
   });
+  wireNoteList(root.querySelector('#notes'));
 
   // Cleanup when leaving this email.
   return () => {
@@ -185,15 +211,11 @@ export async function renderReader(root, id) {
     clearTimeout(saveTimer);
     flushTime();
     saveState(st);
-    db.logEvent('leave', id, { seconds: st.seconds - startSeconds, maxProgress: Math.round(st.maxProgress * 100) / 100, status: status(id) });
+    db.logEvent('leave', id, { seconds: st.seconds - startSeconds, maxProgress: Math.round(st.maxProgress * 100) / 100, status: status(id), skim: skimThisVisit });
   };
 }
 
 function rateRow(rating = 0) {
   return `<div class="rate" role="group" aria-label="Your rating">${RATINGS.map((r) =>
     `<button data-v="${r.v}" aria-pressed="${rating === r.v}"><b>${r.short}</b>${r.label}</button>`).join('')}</div>`;
-}
-
-function noteHtml(n) {
-  return `<div class="note"><time>${fmtDateTime(n.created)}</time>${esc(n.text)}</div>`;
 }
