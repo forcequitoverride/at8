@@ -1,7 +1,7 @@
 // Reader: comfortable reading view that records how you read.
 import { store, stateOf, saveState, status } from './store.js';
 import * as db from './db.js';
-import { esc, linkify, paragraphs, fmtDate, fmtDateTime, readMinutes, toast, icon, SENDER_NAME } from './util.js';
+import { esc, linkify, paragraphs, fmtDate, fmtDateTime, readMinutes, toast, icon, SENDER_NAME, RATINGS, LENGTHS, lengthOf } from './util.js';
 
 const FINISHED = 0.95;   // scrolled 95% of the way = read
 const SIZES = [16, 17, 18, 19, 20, 22, 24, 26];
@@ -44,12 +44,16 @@ export async function renderReader(root, id) {
     </div>
     <article class="page">
       <header>
-        <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span> · ${fmtDate(e.date)} · ${readMinutes(e.words)} min read</div>
+        <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span> · ${fmtDate(e.date)} · ${LENGTHS.find((l) => l.v === lengthOf(e.words)).label}, ${readMinutes(e.words)} min read</div>
         <h1>${esc(e.subject || '(no subject)')}</h1>
         <div class="meta">${opened}</div>
       </header>
+      ${rateRow(st.rating)}
       <p class="hint">Tap a paragraph to highlight it.</p>
       <div class="body" id="body">${paragraphs(e.text).map((p, i) => `<p data-i="${i}" class="${st.highlights.includes(i) ? 'hl' : ''}">${linkify(p).replace(/\n/g, '<br>')}</p>`).join('')}</div>
+
+      <div class="section-title">How did this one land?</div>
+      ${rateRow(st.rating)}
 
       <div class="section-title">Your notes</div>
       <div class="notes" id="notes">${notes.map(noteHtml).join('') || '<p class="hint" id="noNotes">No notes on this email yet.</p>'}</div>
@@ -134,6 +138,16 @@ export async function renderReader(root, id) {
     toast(st.favourite ? 'Added to favourites' : 'Removed from favourites');
   });
 
+  // Rating ladder: tap a level to set it, tap the current level again to clear.
+  root.querySelectorAll('.rate button').forEach((b) => b.addEventListener('click', () => {
+    const v = Number(b.dataset.v);
+    st.rating = st.rating === v ? 0 : v;
+    root.querySelectorAll('.rate button').forEach((x) => x.setAttribute('aria-pressed', Number(x.dataset.v) === st.rating));
+    saveState(st);
+    db.logEvent('rate', id, { rating: st.rating });
+    toast(st.rating ? `Rated: ${RATINGS[st.rating - 1].label}` : 'Rating cleared');
+  }));
+
   const setSize = (d) => {
     const cur = Number(localStorage.getItem('readerSize')) || 19;
     const i = Math.max(0, Math.min(SIZES.length - 1, SIZES.indexOf(SIZES.reduce((a, b) => (Math.abs(b - cur) < Math.abs(a - cur) ? b : a))) + d));
@@ -170,6 +184,11 @@ export async function renderReader(root, id) {
     saveState(st);
     db.logEvent('leave', id, { seconds: st.seconds - startSeconds, maxProgress: Math.round(st.maxProgress * 100) / 100, status: status(id) });
   };
+}
+
+function rateRow(rating = 0) {
+  return `<div class="rate" role="group" aria-label="Your rating">${RATINGS.map((r) =>
+    `<button data-v="${r.v}" aria-pressed="${rating === r.v}"><b>${r.short}</b>${r.label}</button>`).join('')}</div>`;
 }
 
 function noteHtml(n) {

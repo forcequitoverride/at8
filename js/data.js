@@ -140,6 +140,7 @@ async function importJson(data) {
         ...l,
         opens: Math.max(l.opens, r.opens), reads: Math.max(l.reads, r.reads), seconds: Math.max(l.seconds, r.seconds),
         maxProgress: Math.max(l.maxProgress, r.maxProgress), favourite: l.favourite || r.favourite,
+        rating: Math.max(l.rating || 0, r.rating || 0),
         highlights: [...new Set([...l.highlights, ...r.highlights])].sort((a, b) => a - b),
         firstOpened: [l.firstOpened, r.firstOpened].filter(Boolean).sort()[0] || null,
         lastOpened: [l.lastOpened, r.lastOpened].filter(Boolean).sort().at(-1) || null,

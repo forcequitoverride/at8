@@ -34,7 +34,12 @@ async function start() {
   logEvent('app-open', null, { standalone: matchMedia('(display-mode: standalone)').matches });
   // Ask the browser to keep our data (silently granted on many installed PWAs).
   navigator.storage?.persist?.().catch(() => {});
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed', e));
+  if (!('serviceWorker' in navigator)) return;
+  if (location.hostname === 'localhost') {
+    // Dev: no offline cache, so edits show up on reload.
+    (await navigator.serviceWorker.getRegistrations()).forEach((r) => r.unregister());
+    (await caches.keys()).forEach((k) => caches.delete(k));
+  } else navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed', e));
 }
 
 // Make sure the last reading session is saved if the app is closed mid-email.

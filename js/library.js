@@ -1,34 +1,74 @@
-// Library: every email by date, with sender/status/date filters and search.
+// Library: every email, organised by GROUPS (dimensions) that each hold VALUES.
+//   Sender · Read status · Rating · Length · Date · Mood* · Category*   (* arrive with Stage 2 analysis)
+// Within a group, picked values are OR-ed (Short or Medium). Across groups they are AND-ed
+// (Short AND Timeless AND Tate). Each value shows how many emails it would give;
+// values that would give none are greyed out.
 import { store, status, stateOf, search } from './store.js';
 import { logEvent } from './db.js';
-import { esc, fmtDate, fmtMonth, monthKey, readMinutes, debounce, SENDER_NAME } from './util.js';
+import { esc, fmtDate, fmtMonth, monthKey, readMinutes, debounce, SENDER_NAME, LENGTHS, lengthOf, RATINGS } from './util.js';
 
 const CHUNK = 120;
-const f = { q: '', sender: 'all', status: 'all', year: 'all', month: 'all', sort: 'new' };
-let memory = { scrollY: 0, shown: CHUNK };   // restore position when coming back from the reader
+const MONTHS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+const monthName = (m) => new Intl.DateTimeFormat(undefined, { month: 'short' }).format(new Date(`2000-${m}-15`));
 
-export function rememberLibraryScroll() {
-  memory.scrollY = window.scrollY;
+// Each group: key, label, values [{v, label, hint?}], test(email, value).
+function groups() {
+  const years = [...new Set(store.emails.map((e) => e.date.slice(0, 4)))].reverse();
+  return [
+    { key: 'sender', label: 'Sender', values: [{ v: 'tate', label: 'Andrew Tate' }, { v: 'zarak', label: 'Zarak' }], test: (e, v) => e.sender === v },
+    {
+      key: 'status', label: 'Read status',
+      values: [{ v: 'unread', label: 'Never read' }, { v: 'started', label: 'In progress' }, { v: 'read', label: 'Read' }, { v: 'fav', label: '★ Favourite' }],
+      test: (e, v) => (v === 'fav' ? stateOf(e.id).favourite : status(e.id) === v),
+    },
+    {
+      key: 'rating', label: 'Rating',
+      values: [...RATINGS.map((r) => ({ v: String(r.v), label: `${r.short} ${r.label}` })), { v: '0', label: 'Not rated' }],
+      test: (e, v) => String(stateOf(e.id).rating || 0) === v,
+    },
+    { key: 'length', label: 'Length', values: LENGTHS.map((l) => ({ v: l.v, label: l.label, hint: l.hint })), test: (e, v) => lengthOf(e.words) === v },
+    { key: 'year', label: 'Year', values: years.map((y) => ({ v: y, label: y })), test: (e, v) => e.date.startsWith(v) },
+    { key: 'month', label: 'Month', values: MONTHS.map((m) => ({ v: m, label: monthName(m) })), test: (e, v) => e.date.slice(5, 7) === v },
+    { key: 'mood', label: 'Mood', soon: true },
+    { key: 'category', label: 'Category', soon: true },
+  ];
 }
 
-function filtered() {
-  let pool = store.emails;
-  if (f.sender !== 'all') pool = pool.filter((e) => e.sender === f.sender);
-  if (f.year !== 'all') pool = pool.filter((e) => e.date.startsWith(f.year));
-  if (f.year !== 'all' && f.month !== 'all') pool = pool.filter((e) => e.date.slice(5, 7) === f.month);
-  if (f.status === 'fav') pool = pool.filter((e) => stateOf(e.id).favourite);
-  else if (f.status !== 'all') pool = pool.filter((e) => status(e.id) === f.status);
+const f = { q: '', sort: 'new', sel: {} };      // sel: groupKey -> Set of values
+let openGroup = null;
+let memory = { scrollY: 0, shown: CHUNK };
+
+export function rememberLibraryScroll() { memory.scrollY = window.scrollY; }
+
+const selOf = (k) => (f.sel[k] ||= new Set());
+
+function passes(e, G, skipKey = null) {
+  for (const g of G) {
+    if (g.soon || g.key === skipKey) continue;
+    const s = f.sel[g.key];
+    if (s && s.size && ![...s].some((v) => g.test(e, v))) return false;
+  }
+  return true;
+}
+
+const SORTS = {
+  new: { label: 'Newest first', fn: (a, b) => b.date.localeCompare(a.date) },
+  old: { label: 'Oldest first', fn: (a, b) => a.date.localeCompare(b.date) },
+  short: { label: 'Shortest first', fn: (a, b) => a.words - b.words || b.date.localeCompare(a.date) },
+  long: { label: 'Longest first', fn: (a, b) => b.words - a.words || b.date.localeCompare(a.date) },
+};
+
+function filtered(G) {
+  const pool = store.emails.filter((e) => passes(e, G));
   const s = f.q ? search(f.q, pool) : null;
-  if (s) return { list: s.results, terms: s.terms };
-  const list = f.sort === 'new' ? [...pool].reverse() : pool;
-  return { list, terms: null };
+  if (s) return { list: s.results, terms: s.terms, byDate: false };
+  return { list: [...pool].sort(SORTS[f.sort].fn), terms: null, byDate: f.sort === 'new' || f.sort === 'old' };
 }
 
 function snippet(e, terms) {
   const flat = e.text.replace(/\s+/g, ' ');
   if (!terms) return esc(flat.slice(0, 180));
-  const lower = flat.toLowerCase();
-  const at = Math.max(0, lower.indexOf(terms[0]) - 60);
+  const at = Math.max(0, flat.toLowerCase().indexOf(terms[0]) - 60);
   let s = esc((at > 0 ? '…' : '') + flat.slice(at, at + 200));
   for (const t of terms) s = s.replace(new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<mark>$1</mark>');
   return s;
@@ -38,15 +78,17 @@ function itemHtml(e, terms) {
   const st = stateOf(e.id);
   const stat = status(e.id);
   const badges = [];
+  if (st.rating) badges.push(`<span class="badge rating" title="${RATINGS[st.rating - 1].label}">${RATINGS[st.rating - 1].short} ${RATINGS[st.rating - 1].label}</span>`);
   if (st.favourite) badges.push('<span class="star" title="Favourite">★</span>');
   if (st.reads > 1) badges.push(`<span class="badge" title="Times read">read ×${st.reads}</span>`);
   else if (stat === 'read') badges.push('<span class="badge">read</span>');
+  const len = LENGTHS.find((l) => l.v === lengthOf(e.words));
   const progress = stat === 'started' ? `<div class="progress"><i style="width:${Math.round(st.maxProgress * 100)}%"></i></div>` : '';
   return `<li><a class="item ${stat === 'unread' ? 'unread' : ''}" data-sender="${e.sender}" href="#/read/${e.id}">
-    <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span><span>${fmtDate(e.date)}</span><span>${readMinutes(e.words)} min</span>
-    <span class="badges">${badges.join('')}</span></div>
+    <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span><span>${fmtDate(e.date)}</span><span class="len len-${len.v}">${len.label} · ${readMinutes(e.words)} min</span></div>
     <div class="subject">${esc(e.subject || '(no subject)')}</div>
-    <div class="snippet">${snippet(e, terms)}</div>${progress}</a></li>`;
+    <div class="snippet">${snippet(e, terms)}</div>
+    ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}${progress}</a></li>`;
 }
 
 export function renderLibrary(root) {
@@ -55,57 +97,85 @@ export function renderLibrary(root) {
       <div class="empty"><p>No emails loaded yet.</p><a class="btn primary" href="#/data">Import your emails</a></div></div>`;
     return;
   }
-  const years = [...new Set(store.emails.map((e) => e.date.slice(0, 4)))].reverse();
-  const readCount = store.emails.filter((e) => status(e.id) === 'read').length;
+  const G = groups();
   root.innerHTML = `<div class="page">
     <div class="controls" id="controls">
       <input class="search" type="search" id="q" placeholder="Search ${store.emails.length.toLocaleString()} emails" value="${esc(f.q)}" autocomplete="off">
-      <div class="chips" role="group" aria-label="Sender">
-        ${chip('sender', 'all', 'Both')}${chip('sender', 'tate', 'Tate')}${chip('sender', 'zarak', 'Zarak')}
-        <span style="width:6px;flex:none"></span>
-        ${chip('status', 'all', 'All')}${chip('status', 'unread', 'Never read')}${chip('status', 'started', 'In progress')}${chip('status', 'read', 'Read')}${chip('status', 'fav', '★ Favourites')}
+      <div class="chips groups" id="groups" role="tablist" aria-label="Organise by"></div>
+      <div class="facet" id="facet" hidden></div>
+      <div class="active" id="active"></div>
+      <div class="sortrow">
+        <span class="summary" id="summary"></span>
+        <select class="select" id="sort" aria-label="Order">${Object.entries(SORTS).map(([k, s]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
       </div>
-      <div class="chips">
-        <select class="select" id="year" aria-label="Year"><option value="all">All years</option>${years.map((y) => `<option ${f.year === y ? 'selected' : ''}>${y}</option>`).join('')}</select>
-        <select class="select" id="month" aria-label="Month" ${f.year === 'all' ? 'disabled' : ''}><option value="all">All months</option>${
-          ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map((m) => `<option value="${m}" ${f.month === m ? 'selected' : ''}>${new Intl.DateTimeFormat(undefined, { month: 'long' }).format(new Date(`2000-${m}-15`))}</option>`).join('')}</select>
-        <button class="chip" id="sort" ${f.q ? 'disabled' : ''}>${f.sort === 'new' ? 'Newest first' : 'Oldest first'}</button>
-      </div>
-      <div class="summary" id="summary"></div>
     </div>
     <ul class="list" id="list"></ul>
     <div class="sentinel" id="sentinel"></div>
   </div>`;
 
   const controls = root.querySelector('#controls');
-  const setControlsH = () => document.documentElement.style.setProperty('--controls-h', `${controls.offsetHeight}px`);
-  setControlsH();
-
-  let current = filtered();
-  let shown = 0;
   const listEl = root.querySelector('#list');
   const summary = root.querySelector('#summary');
+  let current = filtered(G);
+  let shown = 0;
+
+  const setControlsH = () => document.documentElement.style.setProperty('--controls-h', `${controls.offsetHeight}px`);
+
+  function drawGroups() {
+    root.querySelector('#groups').innerHTML = G.map((g) => {
+      const n = f.sel[g.key]?.size || 0;
+      return `<button class="chip group ${g.soon ? 'soon' : ''}" role="tab" data-g="${g.key}" aria-selected="${openGroup === g.key}" aria-pressed="${openGroup === g.key}">
+        ${g.label}${n ? ` <span class="count">${n}</span>` : ''}</button>`;
+    }).join('');
+    const facet = root.querySelector('#facet');
+    const g = G.find((x) => x.key === openGroup);
+    if (!g) { facet.hidden = true; facet.innerHTML = ''; }
+    else if (g.soon) {
+      facet.hidden = false;
+      facet.innerHTML = `<p class="soon-note"><b>${g.label}</b> fills in after the first analysis (Stage 2). Each email will get ${g.key === 'mood' ? 'moods like reflective, fierce or calm' : 'weighted categories like Spirituality 62%, Strength 31%'}, and you'll be able to pick them here.</p>`;
+    } else {
+      // Count what each value would give, keeping every OTHER group's picks.
+      let base = store.emails.filter((e) => passes(e, G, g.key));
+      if (f.q) base = search(f.q, base)?.results ?? base;
+      const sel = selOf(g.key);
+      facet.hidden = false;
+      facet.innerHTML = `<div class="values">${g.values.map((val) => {
+        const n = base.filter((e) => g.test(e, val.v)).length;
+        const on = sel.has(val.v);
+        return `<button class="chip value" data-v="${val.v}" aria-pressed="${on}" ${!n && !on ? 'disabled' : ''}>${esc(val.label)}${val.hint ? ` <small>${val.hint}</small>` : ''} <span class="n">${n.toLocaleString()}</span></button>`;
+      }).join('')}</div>${g.key === 'month' && !f.sel.year?.size ? '<p class="soon-note">Months apply across all years. Pick a year too to narrow it.</p>' : ''}`;
+    }
+    // Active picks as removable pills.
+    const pills = [];
+    for (const g2 of G) for (const v of f.sel[g2.key] || []) {
+      const val = g2.values.find((x) => x.v === v);
+      pills.push(`<button class="pill" data-g="${g2.key}" data-v="${v}" aria-label="Remove ${esc(val.label)}">${g2.label}: ${esc(val.label)} ✕</button>`);
+    }
+    root.querySelector('#active').innerHTML = pills.length ? pills.join('') + '<button class="pill clear" id="clearAll">Clear all</button>' : '';
+    root.querySelector('#sort').disabled = !!f.q;
+    setControlsH();
+  }
 
   function draw(reset, upTo = CHUNK) {
-    if (reset) { current = filtered(); shown = 0; listEl.innerHTML = ''; }
+    if (reset) { current = filtered(G); shown = 0; listEl.innerHTML = ''; }
     const parts = [];
     const end = Math.min(current.list.length, Math.max(shown + CHUNK, upTo));
     for (let i = shown; i < end; i++) {
       const e = current.list[i];
       const prev = current.list[i - 1];
-      if (!current.terms && (!prev || monthKey(prev.date) !== monthKey(e.date))) parts.push(`<li class="month">${fmtMonth(e.date)}</li>`);
+      if (current.byDate && (!prev || monthKey(prev.date) !== monthKey(e.date))) parts.push(`<li class="month">${fmtMonth(e.date)}</li>`);
       parts.push(itemHtml(e, current.terms));
     }
     listEl.insertAdjacentHTML('beforeend', parts.join(''));
     shown = end;
     memory.shown = shown;
     const n = current.list.length;
-    summary.textContent = current.terms
-      ? `${n.toLocaleString()} match${n === 1 ? '' : 'es'} · best first`
-      : `${n.toLocaleString()} emails · ${readCount.toLocaleString()} of ${store.emails.length.toLocaleString()} read overall`;
-    if (!n) listEl.innerHTML = `<li class="empty">Nothing matches. Try fewer words or clear a filter.</li>`;
+    const mins = current.list.reduce((t, e) => t + e.words, 0) / 200;
+    summary.textContent = `${n.toLocaleString()} ${current.terms ? `match${n === 1 ? '' : 'es'}, best first` : 'emails'} · about ${mins < 90 ? `${Math.round(mins)} min` : `${Math.round(mins / 60)} h`} of reading`;
+    if (!n) listEl.innerHTML = '<li class="empty">Nothing matches. Remove a pick or try fewer words.</li>';
   }
 
+  drawGroups();
   draw(true, memory.shown);
   requestAnimationFrame(() => window.scrollTo(0, memory.scrollY));
 
@@ -113,40 +183,36 @@ export function renderLibrary(root) {
     if (entries[0].isIntersecting && shown < current.list.length) draw(false);
   }, { rootMargin: '800px' }).observe(root.querySelector('#sentinel'));
 
-  const refresh = () => { memory = { scrollY: 0, shown: CHUNK }; window.scrollTo(0, 0); draw(true); };
+  const refresh = () => { memory = { scrollY: 0, shown: CHUNK }; drawGroups(); window.scrollTo(0, 0); draw(true); };
+  const logPick = (g, v, on) => logEvent('filter', null, { group: g, value: v, on, active: Object.fromEntries(Object.entries(f.sel).filter(([, s]) => s.size).map(([k, s]) => [k, [...s]])) });
 
   const logSearch = debounce((q, n) => { if (q.length > 1) logEvent('search', null, { q, results: n }); }, 1200);
   root.querySelector('#q').addEventListener('input', (ev) => {
     f.q = ev.target.value.trim();
-    root.querySelector('#sort').disabled = !!f.q;
     refresh();
     logSearch(f.q, current.list.length);
   });
 
-  root.querySelectorAll('.chip[data-k]').forEach((b) => b.addEventListener('click', () => {
-    f[b.dataset.k] = b.dataset.v;
-    root.querySelectorAll(`.chip[data-k="${b.dataset.k}"]`).forEach((x) => x.setAttribute('aria-pressed', x.dataset.v === f[b.dataset.k]));
-    logEvent('filter', null, { [b.dataset.k]: b.dataset.v });
-    refresh();
-  }));
-
-  root.querySelector('#year').addEventListener('change', (ev) => {
-    f.year = ev.target.value;
-    if (f.year === 'all') f.month = 'all';
-    const m = root.querySelector('#month');
-    m.disabled = f.year === 'all';
-    if (f.year === 'all') m.value = 'all';
-    logEvent('filter', null, { year: f.year });
-    refresh();
+  controls.addEventListener('click', (ev) => {
+    const groupBtn = ev.target.closest('.chip.group');
+    if (groupBtn) { openGroup = openGroup === groupBtn.dataset.g ? null : groupBtn.dataset.g; drawGroups(); return; }
+    const valueBtn = ev.target.closest('.chip.value');
+    if (valueBtn) {
+      const s = selOf(openGroup);
+      const v = valueBtn.dataset.v;
+      const on = !s.has(v);
+      on ? s.add(v) : s.delete(v);
+      logPick(openGroup, v, on);
+      refresh();
+      return;
+    }
+    const pill = ev.target.closest('.pill');
+    if (pill) {
+      if (pill.id === 'clearAll') f.sel = {};
+      else { selOf(pill.dataset.g).delete(pill.dataset.v); logPick(pill.dataset.g, pill.dataset.v, false); }
+      refresh();
+    }
   });
-  root.querySelector('#month').addEventListener('change', (ev) => { f.month = ev.target.value; logEvent('filter', null, { month: f.month }); refresh(); });
-  root.querySelector('#sort').addEventListener('click', (ev) => {
-    f.sort = f.sort === 'new' ? 'old' : 'new';
-    ev.target.textContent = f.sort === 'new' ? 'Newest first' : 'Oldest first';
-    refresh();
-  });
-}
 
-function chip(k, v, label) {
-  return `<button class="chip" data-k="${k}" data-v="${v}" aria-pressed="${f[k] === v}">${label}</button>`;
+  root.querySelector('#sort').addEventListener('change', (ev) => { f.sort = ev.target.value; logEvent('sort', null, { sort: f.sort }); refresh(); });
 }

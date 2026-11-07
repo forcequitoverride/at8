@@ -20,7 +20,23 @@ export const fmtDate = (iso) => DATE_FMT.format(new Date(iso));
 export const fmtMonth = (iso) => MONTH_FMT.format(new Date(iso));
 export const fmtDateTime = (iso) => DATETIME_FMT.format(new Date(iso));
 export const monthKey = (iso) => iso.slice(0, 7);
-export const readMinutes = (words) => Math.max(1, Math.round(words / 230));
+// Reading speed 200 words/min, matching the Length groups below.
+export const readMinutes = (words) => Math.max(1, Math.round(words / 200));
+
+// Length groups (thresholds chosen from the real emails: ~880 short / ~925 medium / ~360 long).
+export const LENGTHS = [
+  { v: 'short', label: 'Short', hint: 'under 1 min', test: (w) => w < 200 },
+  { v: 'medium', label: 'Medium', hint: '1–3 min', test: (w) => w >= 200 && w < 600 },
+  { v: 'long', label: 'Long', hint: '3+ min', test: (w) => w >= 600 },
+];
+export const lengthOf = (words) => LENGTHS.find((l) => l.test(words)).v;
+
+// Your own rating ladder, separate from ★ favourite.
+export const RATINGS = [
+  { v: 1, label: 'Like', short: '♥' },
+  { v: 2, label: 'Like very much', short: '♥♥' },
+  { v: 3, label: 'Timeless', short: '∞' },
+];
 
 export function toast(msg, ms = 2400) {
   const el = document.getElementById('toast');

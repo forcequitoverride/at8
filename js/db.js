@@ -2,7 +2,8 @@
 // Stores:
 //   emails  {id, sender, date, subject, words, text}          — imported content
 //   state   {id, opens, reads, firstOpened, lastOpened, maxProgress, scrollPos,
-//            favourite, highlights:[paragraphIndex], seconds}  — per-email reading state
+//            favourite, rating (0 none, 1 Like, 2 Like very much, 3 Timeless),
+//            highlights:[paragraphIndex], seconds}            — per-email reading state
 //   notes   {nid, emailId|null, text, created}                 — your notes
 //   events  {eid, t, type, emailId?, data?}                    — activity log (append-only)
 //   meta    {key, value}                                       — settings, import info
@@ -103,7 +104,7 @@ export function logEvent(type, emailId = null, data = null) {
 }
 
 export function blankState(id) {
-  return { id, opens: 0, reads: 0, firstOpened: null, lastOpened: null, maxProgress: 0, scrollPos: 0, favourite: false, highlights: [], seconds: 0 };
+  return { id, opens: 0, reads: 0, firstOpened: null, lastOpened: null, maxProgress: 0, scrollPos: 0, favourite: false, rating: 0, highlights: [], seconds: 0 };
 }
 
 export async function getState(id) {
