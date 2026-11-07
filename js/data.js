@@ -18,6 +18,7 @@ export async function renderData(root) {
   const highlights = [...store.state.values()].reduce((n, s) => n + s.highlights.length, 0);
   const devSource = await fetch('data/emails.json', { method: 'HEAD' }).then((r) => r.ok).catch(() => false);
   const theme = localStorage.getItem('theme') || 'system';
+  const cards = localStorage.getItem('cards') || 'comfortable';
 
   root.innerHTML = `<div class="page">
     <div class="page-head"><h1>Data</h1><p>Everything is stored on this device only.</p></div>
@@ -60,11 +61,18 @@ export async function renderData(root) {
 
     <section class="card">
       <h2>Appearance</h2>
+      <p>Theme</p>
       <div class="seg" role="group" aria-label="Theme">
         ${['system', 'light', 'dark'].map((t) => `<button data-theme="${t}" aria-pressed="${theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}
       </div>
+      <p>Library cards</p>
+      <div class="seg" role="group" aria-label="Library cards">
+        <button data-cards="comfortable" aria-pressed="${cards !== 'compact'}">Comfortable</button>
+        <button data-cards="compact" aria-pressed="${cards === 'compact'}">Compact</button>
+      </div>
+      <p class="hint">Compact shows just the subject and the time, for fast scanning. Comfortable adds the opening lines.</p>
     </section>
-    <p class="hint" style="text-align:center">AT8 Zararak ${APP_VERSION} · Stage 1</p>
+    <p class="hint" style="text-align:center">AT8 Zararak ${APP_VERSION} · Stage 1 (v3)</p>
   </div>`;
 
   root.querySelector('#export').addEventListener('click', exportActivity);
@@ -83,6 +91,10 @@ export async function renderData(root) {
     toast(ok ? 'Data protected' : 'The browser said no for now. Installing the app to your home screen usually helps.', 5000);
     renderData(root);
   });
+  root.querySelectorAll('[data-cards]').forEach((b) => b.addEventListener('click', () => {
+    localStorage.setItem('cards', b.dataset.cards);
+    renderData(root);
+  }));
   root.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => {
     localStorage.setItem('theme', b.dataset.theme);
     applyTheme();
@@ -102,7 +114,7 @@ async function exportActivity() {
   const payload = {
     kind: 'at8-activity', version: 1, app: APP_VERSION, exportedAt: now,
     emailCount: store.emails.length, state, notes, events,
-    settings: { theme: localStorage.getItem('theme') || 'system', readerSize: Number(localStorage.getItem('readerSize')) || 19 },
+    settings: { theme: localStorage.getItem('theme') || 'system', readerSize: Number(localStorage.getItem('readerSize')) || 19, cards: localStorage.getItem('cards') || 'comfortable' },
   };
   const name = `at8-activity-${now.slice(0, 10)}.json`;
   const file = new File([JSON.stringify(payload)], name, { type: 'application/json' });

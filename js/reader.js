@@ -1,7 +1,7 @@
 // Reader: comfortable reading view that records how you read.
 import { store, stateOf, saveState, status } from './store.js';
 import * as db from './db.js';
-import { esc, linkify, paragraphs, fmtDate, fmtDateTime, readMinutes, toast, icon, SENDER_NAME, RATINGS, LENGTHS, lengthOf } from './util.js';
+import { esc, linkify, paragraphs, fmtDate, fmtDateTime, readMinutes, toast, icon, fmtMins, minsLeft, lengthLabel, SENDER_NAME, RATINGS, LENGTHS, lengthOf } from './util.js';
 
 const FINISHED = 0.95;   // scrolled 95% of the way = read
 const SIZES = [16, 17, 18, 19, 20, 22, 24, 26];
@@ -35,6 +35,7 @@ export async function renderReader(root, id) {
   root.innerHTML = `<div class="reader" data-sender="${e.sender}">
     <div class="readbar">
       <a class="icon-btn" href="#/" aria-label="Back to library">${icon.back}</a>
+      <span class="time-left" id="timeLeft" aria-live="off"></span>
       <span class="spacer"></span>
       <button class="icon-btn" id="smaller" aria-label="Smaller text">${icon.smaller}</button>
       <button class="icon-btn" id="bigger" aria-label="Bigger text">${icon.bigger}</button>
@@ -64,15 +65,16 @@ export async function renderReader(root, id) {
       </form>
 
       <nav class="nav-next" aria-label="More emails">
-        ${prev ? `<a href="#/read/${prev.id}"><small>← Earlier · ${SENDER_NAME[prev.sender]}</small><span>${esc(prev.subject)}</span></a>` : '<span></span>'}
-        ${next ? `<a href="#/read/${next.id}"><small>Later · ${SENDER_NAME[next.sender]} →</small><span>${esc(next.subject)}</span></a>` : '<span></span>'}
-        ${nextSame && nextSame !== next ? `<a class="wide" href="#/read/${nextSame.id}"><small>Next from ${SENDER_NAME[e.sender]} →</small><span>${esc(nextSame.subject)}</span></a>` : ''}
+        ${prev ? `<a href="#/read/${prev.id}"><small>← Earlier · ${SENDER_NAME[prev.sender]}</small><span>${esc(prev.subject)}</span><small>${lengthLabel(prev.words)}</small></a>` : '<span></span>'}
+        ${next ? `<a href="#/read/${next.id}"><small>Later · ${SENDER_NAME[next.sender]} →</small><span>${esc(next.subject)}</span><small>${lengthLabel(next.words)}</small></a>` : '<span></span>'}
+        ${nextSame && nextSame !== next ? `<a class="wide" href="#/read/${nextSame.id}"><small>Next from ${SENDER_NAME[e.sender]} →</small><span>${esc(nextSame.subject)}</span><small>${lengthLabel(nextSame.words)}</small></a>` : ''}
       </nav>
     </article>
   </div>`;
 
   // --- reading progress -----------------------------------------------------
   const bar = root.querySelector('#bar');
+  const timeLeft = root.querySelector('#timeLeft');
   let finishedThisVisit = false;
   let saveTimer = null;
   const progress = () => {
@@ -85,6 +87,7 @@ export async function renderReader(root, id) {
   const onScroll = () => {
     const p = progress();
     bar.style.width = `${p * 100}%`;
+    timeLeft.textContent = p >= FINISHED ? 'Finished' : `${fmtMins(minsLeft(e.words, p))} left`;
     if (p > st.maxProgress) st.maxProgress = p;
     st.scrollPos = window.scrollY;
     if (p >= FINISHED && !finishedThisVisit) {

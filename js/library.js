@@ -5,7 +5,7 @@
 // values that would give none are greyed out.
 import { store, status, stateOf, search } from './store.js';
 import { logEvent } from './db.js';
-import { esc, fmtDate, fmtMonth, monthKey, readMinutes, debounce, SENDER_NAME, LENGTHS, lengthOf, RATINGS } from './util.js';
+import { esc, fmtDate, fmtMonth, monthKey, readMinutes, debounce, fmtMins, minsLeft, SENDER_NAME, LENGTHS, lengthOf, RATINGS } from './util.js';
 
 const CHUNK = 120;
 const MONTHS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
@@ -35,6 +35,14 @@ function groups() {
 }
 
 const f = { q: '', sort: 'new', sel: {} };      // sel: groupKey -> Set of values
+// Picks and order are remembered between app launches (search text is not).
+try {
+  const saved = JSON.parse(localStorage.getItem('libraryFilters') || 'null');
+  if (saved) { f.sort = saved.sort || 'new'; f.sel = Object.fromEntries(Object.entries(saved.sel || {}).map(([k, v]) => [k, new Set(v)])); }
+} catch {}
+const saveFilters = () => {
+  try { localStorage.setItem('libraryFilters', JSON.stringify({ sort: f.sort, sel: Object.fromEntries(Object.entries(f.sel).map(([k, s]) => [k, [...s]])) })); } catch {}
+};
 let openGroup = null;
 let memory = { scrollY: 0, shown: CHUNK };
 
@@ -62,7 +70,24 @@ function filtered(G) {
   const pool = store.emails.filter((e) => passes(e, G));
   const s = f.q ? search(f.q, pool) : null;
   if (s) return { list: s.results, terms: s.terms, byDate: false };
-  return { list: [...pool].sort(SORTS[f.sort].fn), terms: null, byDate: f.sort === 'new' || f.sort === 'old' };
+  const months = new Map();   // month -> {n, words} for the headings
+  for (const e of pool) { const m = months.get(monthKey(e.date)) || { n: 0, words: 0 }; m.n++; m.words += e.words; months.set(monthKey(e.date), m); }
+  return { list: [...pool].sort(SORTS[f.sort].fn), terms: null, byDate: f.sort === 'new' || f.sort === 'old', months };
+}
+
+const anyPicks = () => Object.values(f.sel).some((s) => s.size);
+
+// Emails you started but didn't finish, most recent first, with the time each still needs.
+function continueStrip() {
+  const started = [...store.state.values()]
+    .filter((s) => s.opens && !s.reads && s.maxProgress < 0.95 && store.byId.has(s.id))
+    .sort((a, b) => (b.lastOpened || '').localeCompare(a.lastOpened || ''))
+    .slice(0, 3);
+  if (!started.length) return '';
+  return `<div class="continue"><div class="continue-title">Continue reading</div>${started.map((s) => {
+    const e = store.byId.get(s.id);
+    return `<a href="#/read/${e.id}" data-sender="${e.sender}"><span class="subj">${esc(e.subject)}</span><span class="left">${fmtMins(minsLeft(e.words, s.maxProgress))} left</span></a>`;
+  }).join('')}</div>`;
 }
 
 function snippet(e, terms) {
@@ -84,8 +109,12 @@ function itemHtml(e, terms) {
   else if (stat === 'read') badges.push('<span class="badge">read</span>');
   const len = LENGTHS.find((l) => l.v === lengthOf(e.words));
   const progress = stat === 'started' ? `<div class="progress"><i style="width:${Math.round(st.maxProgress * 100)}%"></i></div>` : '';
+  // The time cost, shown before you open anything. In progress = what's left.
+  const cost = stat === 'started'
+    ? `${fmtMins(minsLeft(e.words, st.maxProgress))} left`
+    : `${len.label} · ${readMinutes(e.words)} min`;
   return `<li><a class="item ${stat === 'unread' ? 'unread' : ''}" data-sender="${e.sender}" href="#/read/${e.id}">
-    <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span><span>${fmtDate(e.date)}</span><span class="len len-${len.v}">${len.label} · ${readMinutes(e.words)} min</span></div>
+    <div class="meta"><span class="who">${SENDER_NAME[e.sender]}</span><span>${fmtDate(e.date)}</span><span class="len len-${len.v}">${cost}</span></div>
     <div class="subject">${esc(e.subject || '(no subject)')}</div>
     <div class="snippet">${snippet(e, terms)}</div>
     ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}${progress}</a></li>`;
@@ -109,7 +138,8 @@ export function renderLibrary(root) {
         <select class="select" id="sort" aria-label="Order">${Object.entries(SORTS).map(([k, s]) => `<option value="${k}" ${f.sort === k ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
       </div>
     </div>
-    <ul class="list" id="list"></ul>
+    <div id="continue"></div>
+    <ul class="list ${localStorage.getItem('cards') === 'compact' ? 'compact' : ''}" id="list"></ul>
     <div class="sentinel" id="sentinel"></div>
   </div>`;
 
@@ -163,7 +193,10 @@ export function renderLibrary(root) {
     for (let i = shown; i < end; i++) {
       const e = current.list[i];
       const prev = current.list[i - 1];
-      if (current.byDate && (!prev || monthKey(prev.date) !== monthKey(e.date))) parts.push(`<li class="month">${fmtMonth(e.date)}</li>`);
+      if (current.byDate && (!prev || monthKey(prev.date) !== monthKey(e.date))) {
+        const m = current.months.get(monthKey(e.date));
+        parts.push(`<li class="month"><span>${fmtMonth(e.date)}</span><span class="month-stats">${m.n} · ${fmtMins(m.words / 200)}</span></li>`);
+      }
       parts.push(itemHtml(e, current.terms));
     }
     listEl.insertAdjacentHTML('beforeend', parts.join(''));
@@ -173,6 +206,7 @@ export function renderLibrary(root) {
     const mins = current.list.reduce((t, e) => t + e.words, 0) / 200;
     summary.textContent = `${n.toLocaleString()} ${current.terms ? `match${n === 1 ? '' : 'es'}, best first` : 'emails'} · about ${mins < 90 ? `${Math.round(mins)} min` : `${Math.round(mins / 60)} h`} of reading`;
     if (!n) listEl.innerHTML = '<li class="empty">Nothing matches. Remove a pick or try fewer words.</li>';
+    root.querySelector('#continue').innerHTML = !f.q && !anyPicks() ? continueStrip() : '';
   }
 
   drawGroups();
@@ -183,7 +217,7 @@ export function renderLibrary(root) {
     if (entries[0].isIntersecting && shown < current.list.length) draw(false);
   }, { rootMargin: '800px' }).observe(root.querySelector('#sentinel'));
 
-  const refresh = () => { memory = { scrollY: 0, shown: CHUNK }; drawGroups(); window.scrollTo(0, 0); draw(true); };
+  const refresh = () => { memory = { scrollY: 0, shown: CHUNK }; saveFilters(); drawGroups(); window.scrollTo(0, 0); draw(true); };
   const logPick = (g, v, on) => logEvent('filter', null, { group: g, value: v, on, active: Object.fromEntries(Object.entries(f.sel).filter(([, s]) => s.size).map(([k, s]) => [k, [...s]])) });
 
   const logSearch = debounce((q, n) => { if (q.length > 1) logEvent('search', null, { q, results: n }); }, 1200);

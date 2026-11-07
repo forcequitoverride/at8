@@ -23,6 +23,16 @@ export const monthKey = (iso) => iso.slice(0, 7);
 // Reading speed 200 words/min, matching the Length groups below.
 export const readMinutes = (words) => Math.max(1, Math.round(words / 200));
 
+// "4 min", "1 h 10 min", "<1 min"
+export function fmtMins(mins) {
+  if (mins < 1) return '<1 min';
+  const m = Math.round(mins);
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+}
+export const minsLeft = (words, progress) => (words * (1 - progress)) / 200;
+export const lengthLabel = (words) => `${LENGTHS.find((l) => l.test(words)).label} · ${readMinutes(words)} min`;
+
 // Length groups (thresholds chosen from the real emails: ~880 short / ~925 medium / ~360 long).
 export const LENGTHS = [
   { v: 'short', label: 'Short', hint: 'under 1 min', test: (w) => w < 200 },
