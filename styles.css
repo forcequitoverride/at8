@@ -299,3 +299,4 @@ details.exclude summary { cursor: pointer; font-weight: 600; font-size: 14px; pa
 .session { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .session:last-child { border-bottom: 0; }
 .session small { display: block; color: var(--muted); font-size: 12.5px; }
+.stat.dim { opacity: 0.45; }

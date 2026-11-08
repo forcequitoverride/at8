@@ -30,6 +30,8 @@ export function fmtMins(mins) {
   if (m < 60) return `${m} min`;
   return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
 }
+// Durations from seconds: under a minute shows seconds ("42 sec"), otherwise minutes.
+export const fmtDur = (secs) => (secs < 59.5 ? `${Math.round(secs)} sec` : fmtMins(Math.max(1, secs / 60)));
 export const minsLeft = (words, progress) => (words * (1 - progress)) / 200;
 export const lengthLabel = (words) => `${LENGTHS.find((l) => l.test(words)).label} · ${readMinutes(words)} min`;
 

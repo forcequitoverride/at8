@@ -4,7 +4,7 @@
 // By default, left-out periods (Data → What counts) are not shown; "Everything" shows them.
 import * as db from './db.js';
 import { getExclusions } from './counting.js';
-import { esc, fmtMins } from './util.js';
+import { esc, fmtDur } from './util.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const dayKey = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
@@ -105,7 +105,7 @@ function calendar(month, days) {
   for (let n = 1; n <= count; n++) {
     const k = `${first.getFullYear()}-${pad(first.getMonth() + 1)}-${pad(n)}`;
     const d = days.get(k);
-    const tip = d ? `${dayLabel(keyToDate(k))} · ${plural(d.sessions.length, 'session')} · ${fmtMins(mins(d.seconds))}` : `${dayLabel(keyToDate(k))} · not opened`;
+    const tip = d ? `${dayLabel(keyToDate(k))} · ${plural(d.sessions.length, 'session')} · ${fmtDur(d.seconds)}` : `${dayLabel(keyToDate(k))} · not opened`;
     cells += `<button class="cal-day l${level(d?.seconds, max)}${k === today ? ' today' : ''}" data-day="${k}" aria-label="${esc(tip)}">${n}</button>`;
   }
   const opened = inMonth.length;
@@ -124,7 +124,7 @@ function sessionRow(s) {
   if (s.opened.size) bits.push(plural(s.opened.size, 'email') + ' opened');
   if (s.reads) bits.push(`${s.reads} read`);
   if (s.skims) bits.push(`${s.skims} skimmed`);
-  return `<div class="session"><div><b>${timeOf(s.start)}</b> <span class="muted">· ${s.estimated ? '≈ ' : ''}${fmtMins(mins(s.seconds))}</span></div>
+  return `<div class="session"><div><b>${timeOf(s.start)}</b> <span class="muted">· ${s.estimated ? '≈ ' : ''}${fmtDur(s.seconds)}</span></div>
     <small>${bits.join(' · ') || 'Browsing only'}</small></div>`;
 }
 
@@ -132,7 +132,7 @@ function dayDetail(k, days) {
   const d = days.get(k);
   if (!d) return `<p class="hint">${dayLabel(keyToDate(k))}: the app wasn't opened.</p>`;
   return `<div class="section-title">${dayLabel(keyToDate(k))}</div>
-    <p class="hint">${plural(d.sessions.length, 'session')} · ${fmtMins(mins(d.seconds))} in the app · ${fmtMins(mins(d.readSecs))} reading · ${plural(d.opened.size, 'email')} opened</p>
+    <p class="hint">${plural(d.sessions.length, 'session')} · ${fmtDur(d.seconds)} in the app · ${fmtDur(d.readSecs)} reading · ${plural(d.opened.size, 'email')} opened</p>
     ${d.sessions.slice().reverse().map(sessionRow).join('')}`;
 }
 
@@ -154,8 +154,8 @@ export async function renderStats(root) {
   if (!pickedDay) pickedDay = dayKey(Date.now());
   const since = sessions[0] ? keyToDate(dayKey(sessions[0].start)) : null;
 
-  const hourTip = (x, i) => `${pad(i)}:00–${pad((i + 1) % 24)}:00 · ${plural(x.sessions, 'session')} · ${fmtMins(mins(x.seconds))}`;
-  const wdTip = (x, i) => `${WEEKDAYS[i]} · ${plural(x.sessions, 'session')} · ${fmtMins(mins(x.seconds))}`;
+  const hourTip = (x, i) => `${pad(i)}:00–${pad((i + 1) % 24)}:00 · ${plural(x.sessions, 'session')} · ${fmtDur(x.seconds)}`;
+  const wdTip = (x, i) => `${WEEKDAYS[i]} · ${plural(x.sessions, 'session')} · ${fmtDur(x.seconds)}`;
 
   root.innerHTML = `<div class="page">
     <div class="page-head"><h1>Stats</h1><p>When and how you use the app${since ? `, since ${dayLabel(since)}` : ''}.</p></div>
@@ -171,10 +171,10 @@ export async function renderStats(root) {
       <div class="stats">
         <div class="stat"><b>${days.size}</b><span>days opened</span></div>
         <div class="stat"><b>${sessions.length}</b><span>sessions</span></div>
-        <div class="stat"><b>${fmtMins(mins(total))}</b><span>in the app</span></div>
-        <div class="stat"><b>${fmtMins(mins(total / sessions.length))}</b><span>per session</span></div>
-        <div class="stat"><b>${fmtMins(mins(reading))}</b><span>reading</span></div>
-        <div class="stat"><b>${streak}</b><span>day streak · best ${longest}</span></div>
+        <div class="stat"><b>${fmtDur(total)}</b><span>in the app</span></div>
+        <div class="stat"><b>${fmtDur(total / sessions.length)}</b><span>per session</span></div>
+        <div class="stat"><b>${fmtDur(reading)}</b><span>reading</span></div>
+        <div class="stat dim"><b>${streak}</b><span>day streak · best ${longest}</span></div>
       </div>
     </section>
 
