@@ -5,6 +5,7 @@ import { renderLibrary, rememberLibraryScroll } from './library.js';
 import { renderReader } from './reader.js';
 import { renderSaved } from './saved.js';
 import { renderData, applyTheme } from './data.js';
+import { primeExclusions, isPaused } from './counting.js';
 
 const view = document.getElementById('view');
 let cleanup = null;
@@ -29,9 +30,11 @@ async function route() {
 async function start() {
   applyTheme();
   await load();
+  await primeExclusions();
   window.addEventListener('hashchange', route);
   await route();
-  logEvent('app-open', null, { standalone: matchMedia('(display-mode: standalone)').matches });
+  logEvent('app-open', null, { standalone: matchMedia('(display-mode: standalone)').matches, paused: isPaused() });
+  trackSessions();
   // Ask the browser to keep our data (silently granted on many installed PWAs).
   navigator.storage?.persist?.().catch(() => {});
   if (!('serviceWorker' in navigator)) return;
@@ -40,6 +43,21 @@ async function start() {
     (await navigator.serviceWorker.getRegistrations()).forEach((r) => r.unregister());
     (await caches.keys()).forEach((k) => caches.delete(k));
   } else navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed', e));
+}
+
+// App sessions: when the app is on screen, and for how long. Logged as
+// app-open / app-show (came back) and app-hide {seconds on screen since last show}.
+function trackSessions() {
+  let since = document.visibilityState === 'visible' ? Date.now() : null;
+  const hide = () => {
+    if (!since) return;
+    logEvent('app-hide', null, { seconds: Math.round((Date.now() - since) / 1000) });
+    since = null;
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { since = Date.now(); logEvent('app-show'); } else hide();
+  });
+  window.addEventListener('pagehide', hide);
 }
 
 // Make sure the last reading session is saved if the app is closed mid-email.

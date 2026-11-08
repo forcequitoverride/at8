@@ -3,6 +3,7 @@ import { store, stateOf, saveState, status } from './store.js';
 import * as db from './db.js';
 import { esc, linkify, paragraphs, fmtDate, readMinutes, toast, icon, fmtMins, minsLeft, lengthLabel, SENDER_NAME, RATINGS, LENGTHS, lengthOf } from './util.js';
 import { noteHtml, noteFormHtml, wireNoteForm, wireNoteList } from './notes.js';
+import { isPaused } from './counting.js';
 
 const FINISHED = 0.95;   // scrolled 95% of the way = read
 const SIZES = [16, 17, 18, 19, 20, 22, 24, 26];
@@ -16,13 +17,18 @@ export async function renderReader(root, id) {
 
   const st = { ...stateOf(id), highlights: [...stateOf(id).highlights] };
   st.skims ||= 0;
+  const counting = !isPaused();
+  const base = { ...st };
+  const COUNTERS = ['opens', 'reads', 'skims', 'seconds', 'maxProgress', 'scrollPos', 'firstOpened', 'lastOpened'];
+  const persist = () => saveState(counting ? st : { ...st, ...Object.fromEntries(COUNTERS.map((k) => [k, base[k]])) });
+  let visitMax = 0;
   const wasFinished = st.reads > 0;
   const now = new Date().toISOString();
   st.opens += 1;
   st.firstOpened ||= now;
   st.lastOpened = now;
-  await saveState(st);
-  db.logEvent('open', id, { from: store.lastOpenedId, opens: st.opens });
+  await persist();
+  db.logEvent('open', id, { from: store.lastOpenedId, opens: st.opens, counted: counting });
   store.lastOpenedId = id;
 
   const idx = store.emails.indexOf(e);
@@ -37,6 +43,7 @@ export async function renderReader(root, id) {
   let finishedThisVisit = false;
   // Your history with this email — re-reads are shown plainly.
   const historyLine = () => {
+    if (!counting) return '<b>Not counting</b> · counting is paused (Data page)';
     const parts = [];
     if (st.opens === 1 && !st.reads && !st.skims) parts.push('First time here');
     else {
@@ -99,18 +106,19 @@ export async function renderReader(root, id) {
     bar.style.width = `${p * 100}%`;
     timeLeft.textContent = p >= FINISHED ? 'Finished' : `${fmtMins(minsLeft(e.words, p))} left`;
     if (p > st.maxProgress) st.maxProgress = p;
+    if (p > visitMax) visitMax = p;
     st.scrollPos = window.scrollY;
     if (p >= FINISHED && !finishedThisVisit) {
       finishedThisVisit = true;
       if (!skimThisVisit) {
         st.reads += 1;
-        db.logEvent('finish', id, { reads: st.reads });
-        toast(st.reads === 1 ? 'Marked as read' : `Read ${st.reads} times now`);
+        db.logEvent('finish', id, { reads: st.reads, counted: counting });
+        if (counting) toast(st.reads === 1 ? 'Marked as read' : `Read ${st.reads} times now`);
         root.querySelector('#history').innerHTML = historyLine();
       }
     }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveState(st), 800);
+    saveTimer = setTimeout(persist, 800);
   };
 
   // Resume where you left off if it was never finished.
@@ -128,7 +136,7 @@ export async function renderReader(root, id) {
   };
   const onVisibility = () => {
     if (document.visibilityState === 'visible') visibleSince = Date.now();
-    else { flushTime(); saveState(st); }
+    else { flushTime(); persist(); }
   };
   document.addEventListener('visibilitychange', onVisibility);
   const startSeconds = st.seconds;
@@ -142,14 +150,14 @@ export async function renderReader(root, id) {
     const on = !st.highlights.includes(i);
     st.highlights = on ? [...st.highlights, i].sort((a, b) => a - b) : st.highlights.filter((x) => x !== i);
     p.classList.toggle('hl', on);
-    saveState(st);
+    persist();
     db.logEvent(on ? 'highlight' : 'unhighlight', id, { p: i });
   });
 
   root.querySelector('#fav').addEventListener('click', (ev) => {
     st.favourite = !st.favourite;
     ev.currentTarget.setAttribute('aria-pressed', st.favourite);
-    saveState(st);
+    persist();
     db.logEvent('favourite', id, { on: st.favourite });
     toast(st.favourite ? 'Added to favourites' : 'Removed from favourites');
   });
@@ -166,8 +174,8 @@ export async function renderReader(root, id) {
       if (finishedThisVisit) st.reads += 1;
     }
     root.querySelector('#history').innerHTML = historyLine();
-    saveState(st);
-    db.logEvent('skim', id, { on: skimThisVisit });
+    persist();
+    db.logEvent('skim', id, { on: skimThisVisit, finished: finishedThisVisit });
     toast(skimThisVisit ? 'Counted as a skim, not a read' : 'Counting this as a proper read again');
   });
 
@@ -176,7 +184,7 @@ export async function renderReader(root, id) {
     const v = Number(b.dataset.v);
     st.rating = st.rating === v ? 0 : v;
     root.querySelectorAll('.rate button').forEach((x) => x.setAttribute('aria-pressed', Number(x.dataset.v) === st.rating));
-    saveState(st);
+    persist();
     db.logEvent('rate', id, { rating: st.rating });
     toast(st.rating ? `Rated: ${RATINGS[st.rating - 1].label}` : 'Rating cleared');
   }));
@@ -210,8 +218,8 @@ export async function renderReader(root, id) {
     document.removeEventListener('visibilitychange', onVisibility);
     clearTimeout(saveTimer);
     flushTime();
-    saveState(st);
-    db.logEvent('leave', id, { seconds: st.seconds - startSeconds, maxProgress: Math.round(st.maxProgress * 100) / 100, status: status(id), skim: skimThisVisit });
+    persist();
+    db.logEvent('leave', id, { seconds: st.seconds - startSeconds, visitMax: Math.round(visitMax * 100) / 100, maxProgress: Math.round(st.maxProgress * 100) / 100, status: status(id), skim: skimThisVisit, counted: counting });
   };
 }
 

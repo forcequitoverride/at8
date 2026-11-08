@@ -257,3 +257,18 @@ textarea { width: 100%; min-height: 84px; padding: 10px 12px; border-radius: 12p
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 body.reading #toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
+
+/* What counts: pause + left-out periods */
+.paused-note { color: var(--text) !important; background: color-mix(in srgb, var(--tate) 14%, var(--surface)); border-radius: 10px; padding: 8px 10px; }
+.period { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
+.period b { display: block; font-size: 14px; }
+.period small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.period .link { flex: none; }
+details.exclude { margin-top: 12px; }
+details.exclude summary { cursor: pointer; font-weight: 600; font-size: 14px; padding: 4px 0; }
+#excludeForm { display: grid; gap: 10px; margin-top: 8px; }
+#excludeForm label:not(.check) { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+#excludeForm input[type="datetime-local"], #excludeForm input[type="text"] {
+  width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font-size: 16px; color: var(--text);
+}
+#excludeForm .hint { margin: 0; }
