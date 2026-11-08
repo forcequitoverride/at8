@@ -6,6 +6,7 @@ import { renderReader } from './reader.js';
 import { renderSaved } from './saved.js';
 import { renderData, applyTheme } from './data.js';
 import { primeExclusions, isPaused } from './counting.js';
+import { renderStats } from './stats.js';
 
 const view = document.getElementById('view');
 let cleanup = null;
@@ -23,6 +24,7 @@ async function route() {
 
   if (name === 'read') cleanup = await renderReader(view, arg);
   else if (name === 'saved') { await renderSaved(view); window.scrollTo(0, 0); }
+  else if (name === 'stats') { await renderStats(view); window.scrollTo(0, 0); }
   else if (name === 'data') { await renderData(view); window.scrollTo(0, 0); }
   else renderLibrary(view);
 }
