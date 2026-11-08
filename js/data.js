@@ -127,7 +127,7 @@ export async function renderData(root) {
       </div>
       <p class="hint">Compact shows just the subject and the time, for fast scanning. Comfortable adds the opening lines.</p>
     </section>
-    <p class="hint" style="text-align:center">AT8 Zararak ${APP_VERSION} · Stage 1 (v7)</p>
+    <p class="hint" style="text-align:center">AT8 Zararak ${APP_VERSION} · Stage 1 (v8)</p>
   </div>`;
 
   root.querySelector('#export').addEventListener('click', exportActivity);

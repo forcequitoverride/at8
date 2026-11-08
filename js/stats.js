@@ -128,12 +128,28 @@ function sessionRow(s) {
     <small>${bits.join(' · ') || 'Browsing only'}</small></div>`;
 }
 
+// A day's sessions in two columns, before 12:00 and from 12:00, in time order.
+// Each column shows its first few sessions; the rest fold away under "+N more".
+const SHOW = 4;
+function halves(list) {
+  const col = (title, items) => {
+    const total = items.reduce((n, s) => n + s.seconds, 0);
+    const rows = items.map(sessionRow);
+    return `<div class="half"><div class="half-title">${title}${items.length ? ` <span>· ${items.length} · ${fmtDur(total)}</span>` : ''}</div>
+      ${rows.length ? rows.slice(0, SHOW).join('') : '<p class="half-none">—</p>'}
+      ${rows.length > SHOW ? `<details class="more"><summary>+${rows.length - SHOW} more</summary>${rows.slice(SHOW).join('')}</details>` : ''}</div>`;
+  };
+  const am = list.filter((s) => new Date(s.start).getHours() < 12);
+  const pm = list.filter((s) => new Date(s.start).getHours() >= 12);
+  return `<div class="halves">${col('Before 12', am)}${col('From 12', pm)}</div>`;
+}
+
 function dayDetail(k, days) {
   const d = days.get(k);
   if (!d) return `<p class="hint">${dayLabel(keyToDate(k))}: the app wasn't opened.</p>`;
   return `<div class="section-title">${dayLabel(keyToDate(k))}</div>
     <p class="hint">${plural(d.sessions.length, 'session')} · ${fmtDur(d.seconds)} in the app · ${fmtDur(d.readSecs)} reading · ${plural(d.opened.size, 'email')} opened</p>
-    ${d.sessions.slice().reverse().map(sessionRow).join('')}`;
+    ${halves(d.sessions)}`;
 }
 
 let shownMonth = null;
@@ -199,7 +215,7 @@ export async function renderStats(root) {
 
     <section class="card">
       <h2>Recent sessions</h2>
-      ${[...days.keys()].sort().reverse().slice(0, 7).map((k) => `<div class="section-title">${dayLabel(keyToDate(k))}</div>${days.get(k).sessions.slice().reverse().map(sessionRow).join('')}`).join('')}
+      ${[...days.keys()].sort().reverse().slice(0, 7).map((k) => `<div class="section-title">${dayLabel(keyToDate(k))}</div>${halves(days.get(k).sessions)}`).join('')}
       <p class="hint" style="margin-top:10px">≈ means estimated: older sessions, from before v5, have no recorded end.</p>
     </section>`}
   </div>`;

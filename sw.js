@@ -2,7 +2,7 @@
 // Strategy: serve the app shell from cache, refresh it in the background, so a
 // new version is picked up on the next open. Bump VERSION when shipping changes.
 // Email data is NOT cached here — it lives in IndexedDB.
-const VERSION = 'at8-v7';
+const VERSION = 'at8-v8';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/store.js', 'js/library.js', 'js/reader.js', 'js/saved.js', 'js/data.js', 'js/util.js', 'js/notes.js', 'js/counting.js', 'js/stats.js',

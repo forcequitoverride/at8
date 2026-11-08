@@ -300,3 +300,11 @@ details.exclude summary { cursor: pointer; font-weight: 600; font-size: 14px; pa
 .session:last-child { border-bottom: 0; }
 .session small { display: block; color: var(--muted); font-size: 12.5px; }
 .stat.dim { opacity: 0.45; }
+.halves { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.half { min-width: 0; }
+.half-title { font-size: 12.5px; font-weight: 600; padding-bottom: 2px; border-bottom: 1px solid var(--line); }
+.half-title span { font-weight: 400; color: var(--muted); }
+.half .session { font-size: 13.5px; padding: 6px 0; }
+.half .session small { font-size: 12px; }
+.half-none { color: var(--muted); font-size: 13px; margin: 6px 0 !important; }
+.more summary { font-size: 12.5px; color: var(--muted); padding: 6px 0; cursor: pointer; }
